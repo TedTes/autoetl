@@ -3,7 +3,7 @@ import logging
 import pandas as pd
 from datetime import datetime
 
-from jobs.base_job import ETLJob, JobError
+from jobs.base_job import ETLJob, JobError, JobResult
 from clients.ckan_client import CKANClient, CKANAPIError
 from transformers.date_transformer import DateTransformer
 from transformers.numeric_transformer import NumericTransformer
@@ -11,9 +11,11 @@ from etl.pipeline import TransformerPipeline
 from validators.column_drift_detector import ColumnDriftDetector
 from repositories.building_permit_repository import BuildingPermitRepository
 from repositories.schema_repository import SchemaRepository
+from repositories.job_execution_repository import JobExecutionRepository
 from alerts.console_notifier import ConsoleNotifier
 from alerts.base_notifier import AlertSeverity
 from models.building_permit import BuildingPermit
+from models.job_execution import JobExecution
 from database.connection import DatabaseConnection
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,7 @@ class BuildingPermitsETLJob(ETLJob):
         ckan_client: CKANClient,
         building_permit_repo: BuildingPermitRepository,
         schema_repo: SchemaRepository,
+        job_execution_repo: JobExecutionRepository,
         drift_detector: ColumnDriftDetector,
         notifier: ConsoleNotifier,
         pipeline: TransformerPipeline
@@ -43,6 +46,7 @@ class BuildingPermitsETLJob(ETLJob):
             ckan_client: CKAN API client for data extraction
             building_permit_repo: Repository for building permits
             schema_repo: Repository for schema metadata
+            job_execution_repo: Repository for job execution tracking
             drift_detector: Schema drift validator
             notifier: Alert notifier
             pipeline: Transformer pipeline
@@ -52,6 +56,7 @@ class BuildingPermitsETLJob(ETLJob):
         self.ckan_client = ckan_client
         self.building_permit_repo = building_permit_repo
         self.schema_repo = schema_repo
+        self.job_execution_repo = job_execution_repo
         self.drift_detector = drift_detector
         self.notifier = notifier
         self.pipeline = pipeline
@@ -59,9 +64,10 @@ class BuildingPermitsETLJob(ETLJob):
         self.raw_data: pd.DataFrame = None
         self.transformed_data: pd.DataFrame = None
         self.session = None
+        self.job_execution_record: JobExecution = None
     
     def setup(self) -> None:
-        """Setup phase - validate connections and configuration."""
+        """Setup phase - validate connections and start database transaction."""
         logger.info("Validating CKAN API connection...")
         
         if not self.ckan_client.health_check():
@@ -71,6 +77,25 @@ class BuildingPermitsETLJob(ETLJob):
             )
         
         logger.info("CKAN API connection validated successfully")
+        
+        # Start database session/transaction
+        logger.info("Initializing database session...")
+        self.session = DatabaseConnection.get_session_factory()()
+        
+        # Update repository sessions to use the job's session
+        self.building_permit_repo.session = self.session
+        self.schema_repo.session = self.session
+        self.job_execution_repo.session = self.session
+        
+        # Create job execution record
+        self.job_execution_record = JobExecution(
+            job_name=self.job_name,
+            status='running',
+            start_time=datetime.utcnow()
+        )
+        self.job_execution_repo.save(self.job_execution_record)
+        
+        logger.info("Database session initialized and job execution record created")
     
     def extract(self) -> pd.DataFrame:
         """Extract phase - fetch data from CKAN API."""
@@ -256,8 +281,47 @@ class BuildingPermitsETLJob(ETLJob):
         return entities
     
     def cleanup(self) -> None:
-        """Cleanup phase - release resources."""
-        logger.info("Cleanup: Clearing cached data...")
+        """Cleanup phase - update job execution record, commit or rollback transaction."""
+        logger.info("Cleanup: Managing database transaction...")
+        
+        if self.session:
+            try:
+                # Update job execution record with final status
+                if self.job_execution_record:
+                    self.job_execution_record.end_time = datetime.utcnow()
+                    
+                    if self.job_execution_record.start_time and self.job_execution_record.end_time:
+                        duration = self.job_execution_record.end_time - self.job_execution_record.start_time
+                        self.job_execution_record.duration_seconds = int(duration.total_seconds())
+                    
+                    # Status will be updated based on execution result
+                    if hasattr(self, '_execution_failed') and self._execution_failed:
+                        self.job_execution_record.status = 'failed'
+                        
+                        # Rollback transaction
+                        logger.warning("Rolling back transaction due to job failure...")
+                        self.session.rollback()
+                        logger.info("Transaction rolled back successfully")
+                    else:
+                        self.job_execution_record.status = 'success'
+                        
+                        # Commit transaction
+                        logger.info("Committing transaction...")
+                        self.session.commit()
+                        logger.info("Transaction committed successfully")
+                        
+            except Exception as e:
+                logger.error(f"Error during transaction cleanup: {str(e)}")
+                try:
+                    self.session.rollback()
+                except Exception:
+                    pass
+            finally:
+                self.session.close()
+                logger.info("Database session closed")
+        
+        # Clear cached data
+        logger.info("Clearing cached data...")
         self.raw_data = None
         self.transformed_data = None
         logger.info("Cleanup complete")
