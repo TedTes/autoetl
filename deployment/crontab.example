@@ -1,0 +1,95 @@
+# ETL Pipeline Crontab Configuration
+#
+# This file contains cron schedules for running ETL jobs.
+# Copy to your system's crontab or use with cron manager.
+#
+# Installation:
+#   crontab -e
+#   (paste the relevant lines below)
+#
+# Or use:
+#   crontab deployment/crontab.example
+
+# ============================================================================
+# Environment Variables
+# ============================================================================
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+HOME=/home/your_username
+PROJECT_DIR=/path/to/building-permits-etl
+PYTHON_BIN=/path/to/venv/bin/python
+LOG_DIR=/path/to/logs
+
+# ============================================================================
+# Building Permits ETL Job
+# ============================================================================
+
+# Run nightly at 2:00 AM (low traffic time)
+# Format: minute hour day month day_of_week command
+0 2 * * * cd $PROJECT_DIR && $PYTHON_BIN main.py building_permits >> $LOG_DIR/cron.log 2>&1
+
+# Alternative schedules (commented out - uncomment as needed):
+
+# Run every 6 hours
+# 0 */6 * * * cd $PROJECT_DIR && $PYTHON_BIN main.py building_permits >> $LOG_DIR/cron.log 2>&1
+
+# Run daily at midnight
+# 0 0 * * * cd $PROJECT_DIR && $PYTHON_BIN main.py building_permits >> $LOG_DIR/cron.log 2>&1
+
+# Run twice daily (6 AM and 6 PM)
+# 0 6,18 * * * cd $PROJECT_DIR && $PYTHON_BIN main.py building_permits >> $LOG_DIR/cron.log 2>&1
+
+# Run on weekdays only at 3 AM
+# 0 3 * * 1-5 cd $PROJECT_DIR && $PYTHON_BIN main.py building_permits >> $LOG_DIR/cron.log 2>&1
+
+# ============================================================================
+# Maintenance Tasks
+# ============================================================================
+
+# Clean up old log files (keep last 30 days)
+0 3 * * 0 find $LOG_DIR -name "*.log" -type f -mtime +30 -delete
+
+# Database backup (weekly on Sunday at 1 AM)
+# 0 1 * * 0 cd $PROJECT_DIR && /path/to/backup_script.sh >> $LOG_DIR/backup.log 2>&1
+
+# ============================================================================
+# Notes
+# ============================================================================
+#
+# Cron Schedule Format:
+#   * * * * * command
+#   │ │ │ │ │
+#   │ │ │ │ └─── day of week (0-7, 0 and 7 are Sunday)
+#   │ │ │ └───── month (1-12)
+#   │ │ └─────── day of month (1-31)
+#   │ └───────── hour (0-23)
+#   └─────────── minute (0-59)
+#
+# Special Characters:
+#   * - any value
+#   , - value list separator
+#   - - range of values
+#   / - step values
+#
+# Examples:
+#   0 0 * * *       Daily at midnight
+#   0 */6 * * *     Every 6 hours
+#   30 2 * * 1-5    2:30 AM on weekdays
+#   0 0 1 * *       First day of every month
+#
+# Logging:
+#   >> $LOG_DIR/cron.log 2>&1  (append stdout and stderr to file)
+#   > $LOG_DIR/cron.log 2>&1   (overwrite log file each run)
+#   2>&1 | tee -a $LOG_DIR/cron.log  (both console and file)
+#
+# Testing:
+#   Run manually to test: cd $PROJECT_DIR && $PYTHON_BIN main.py building_permits
+#   Check logs: tail -f $LOG_DIR/cron.log
+#   View cron logs: grep CRON /var/log/syslog
+#
+# Troubleshooting:
+#   - Ensure all paths are absolute
+#   - Verify environment variables are set correctly
+#   - Check permissions on scripts and log directories
+#   - Test command manually before scheduling
+#   - Monitor logs for errors
