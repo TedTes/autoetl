@@ -28,7 +28,7 @@ class JobExecution(Base):
     error_message = Column(Text, nullable=True)
     
     # Additional metadata (schema drift info, etc.)
-    metadata = Column(JSON, nullable=True)
+    job_metadata = Column(JSON, nullable=True)
     
     # Audit fields
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -1,3 +1,6 @@
 venv/
 .env.dev
 .env.prod
+__pycache__/
+.env
+.DS_Store
