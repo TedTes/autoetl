@@ -24,6 +24,7 @@ class BuildingPermitsETLJob(ETLJob):
     ETL job for Toronto Building Permits data.
     
     Orchestrates: CKAN fetch → Transform → Validate → Load → Alert
+    Includes transaction management with automatic rollback on failure.
     """
     
     def __init__(
@@ -57,6 +58,7 @@ class BuildingPermitsETLJob(ETLJob):
         
         self.raw_data: pd.DataFrame = None
         self.transformed_data: pd.DataFrame = None
+        self.session = None
     
     def setup(self) -> None:
         """Setup phase - validate connections and configuration."""
