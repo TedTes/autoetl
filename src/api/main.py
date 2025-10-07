@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
+from api.routes import building_permits_router
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include routers
+app.include_router(building_permits_router)
 
 @app.on_event("startup")
 async def startup_event():
