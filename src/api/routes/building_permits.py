@@ -4,7 +4,7 @@ Building Permits API routes.
 Provides endpoints for accessing building permit data.
 """
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Path
 from typing import Optional
 from datetime import date
 import logging
@@ -17,6 +17,7 @@ from api.schemas.building_permit_schema import (
     ErrorResponse
 )
 from repositories.building_permit_repository import BuildingPermitRepository
+from models.building_permit import BuildingPermit
 from sqlalchemy import and_
 
 logger = logging.getLogger(__name__)
@@ -54,8 +55,6 @@ async def list_building_permits(
     """
     try:
         # Build query with filters
-        query = repo.session.query(repo.session.query(BuildingPermit).statement.columns)
-        
         filters = []
         if ward:
             filters.append(BuildingPermit.ward == ward)
@@ -68,10 +67,8 @@ async def list_building_permits(
         
         # Apply filters
         if filters:
-            from models.building_permit import BuildingPermit
             query = repo.session.query(BuildingPermit).filter(and_(*filters))
         else:
-            from models.building_permit import BuildingPermit
             query = repo.session.query(BuildingPermit)
         
         # Get total count
@@ -106,4 +103,60 @@ async def list_building_permits(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to retrieve building permits: {str(e)}"
+        )
+
+
+@router.get(
+    "/building-permits/{permit_id}",
+    response_model=BuildingPermitResponse,
+    summary="Get a single building permit",
+    description="Retrieve a building permit by ID or permit number",
+    responses={
+        200: {"description": "Building permit found"},
+        404: {"model": ErrorResponse, "description": "Building permit not found"}
+    }
+)
+async def get_building_permit(
+    permit_id: str = Path(..., description="Building permit ID or permit number"),
+    repo: BuildingPermitRepository = Depends(get_building_permit_repository)
+):
+    """
+    Get a single building permit by ID or permit number.
+    
+    **Parameters:**
+    - permit_id: Can be either:
+        - Numeric ID (e.g., `123`)
+        - Permit number (e.g., `24-123456`)
+    
+    **Returns:**
+    - Building permit details if found
+    - 404 error if not found
+    """
+    try:
+        # Try to parse as integer ID first
+        try:
+            id_int = int(permit_id)
+            permit = repo.find_by_id(id_int)
+        except ValueError:
+            # Not an integer, treat as permit number
+            permit = repo.find_by_permit_number(permit_id)
+        
+        if not permit:
+            logger.warning(f"Building permit not found: {permit_id}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Building permit not found: {permit_id}"
+            )
+        
+        logger.info(f"Retrieved building permit: {permit_id}")
+        
+        return BuildingPermitResponse.model_validate(permit)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving building permit {permit_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve building permit: {str(e)}"
         )
