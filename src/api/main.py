@@ -48,3 +48,38 @@ async def root():
             # Future datasets will be added here dynamically
         ]
     }
+
+
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint - verifies API and database connectivity.
+    
+    Returns:
+        dict: Health status with timestamp and database connection status
+    """
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "api_version": "0.1.0",
+        "checks": {}
+    }
+    
+    # Check database connection
+    try:
+        with DatabaseConnection.get_session() as session:
+            # Simple query to test connection
+            session.execute("SELECT 1")
+            health_status["checks"]["database"] = {
+                "status": "connected",
+                "message": "Database connection successful"
+            }
+    except Exception as e:
+        health_status["status"] = "unhealthy"
+        health_status["checks"]["database"] = {
+            "status": "error",
+            "message": f"Database connection failed: {str(e)}"
+        }
+        logger.error(f"Health check failed - Database error: {str(e)}")
+    
+    return health_status
