@@ -25,6 +25,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(building_permits_router)
+app.include_router(download_router)
 
 @app.on_event("startup")
 async def startup_event():

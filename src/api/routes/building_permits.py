@@ -5,6 +5,7 @@ Provides endpoints for accessing building permit data.
 """
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Path
+from fastapi.responses import StreamingResponse
 from typing import Optional
 from datetime import date
 import logging
@@ -16,6 +17,7 @@ from api.schemas.building_permit_schema import (
     PaginationMetadata,
     ErrorResponse
 )
+from api.utils.csv_streamer import CSVStreamer, generate_filename
 from repositories.building_permit_repository import BuildingPermitRepository
 from models.building_permit import BuildingPermit
 from sqlalchemy import and_
@@ -159,4 +161,96 @@ async def get_building_permit(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to retrieve building permit: {str(e)}"
+        )
+
+
+# CSV Download Router (separate from /api/v1 prefix)
+download_router = APIRouter(tags=["Downloads"])
+
+
+@download_router.get(
+    "/download/building-permits.csv",
+    summary="Download building permits as CSV",
+    description="Stream building permits data as CSV file with optional filters",
+    response_class=StreamingResponse
+)
+async def download_building_permits_csv(
+    ward: Optional[str] = Query(None, description="Filter by ward"),
+    permit_type: Optional[str] = Query(None, description="Filter by permit type"),
+    issued_after: Optional[date] = Query(None, description="Filter by issued date (after)"),
+    issued_before: Optional[date] = Query(None, description="Filter by issued date (before)"),
+    repo: BuildingPermitRepository = Depends(get_building_permit_repository)
+):
+    """
+    Download building permits data as CSV file.
+    
+    **Features:**
+    - Streams data efficiently (no memory limit)
+    - Supports same filters as JSON API
+    - Returns all matching records (no pagination)
+    - Timestamped filename for easy organization
+    
+    **Filters:**
+    - ward: Municipal ward number
+    - permit_type: Type of permit
+    - issued_after: Issued date range start
+    - issued_before: Issued date range end
+    """
+    try:
+        # Build query with filters
+        filters = []
+        if ward:
+            filters.append(BuildingPermit.ward == ward)
+        if permit_type:
+            filters.append(BuildingPermit.permit_type == permit_type)
+        if issued_after:
+            filters.append(BuildingPermit.issued_date >= issued_after)
+        if issued_before:
+            filters.append(BuildingPermit.issued_date <= issued_before)
+        
+        # Apply filters
+        if filters:
+            query = repo.session.query(BuildingPermit).filter(and_(*filters))
+        else:
+            query = repo.session.query(BuildingPermit)
+        
+        # Define CSV headers (column names)
+        headers = [
+            'id',
+            'permit_number',
+            'application_date',
+            'issued_date',
+            'permit_type',
+            'work_description',
+            'street_number',
+            'street_name',
+            'postal_code',
+            'ward',
+            'estimated_cost',
+            'created_at',
+            'updated_at'
+        ]
+        
+        # Create CSV streamer
+        streamer = CSVStreamer(headers)
+        
+        # Generate timestamped filename
+        filename = generate_filename('building-permits', 'csv')
+        
+        logger.info(f"Starting CSV download: {filename}")
+        
+        # Return streaming response
+        return StreamingResponse(
+            streamer.stream_rows(query),
+            media_type='text/csv',
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"'
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generating CSV download: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate CSV download: {str(e)}"
         )
