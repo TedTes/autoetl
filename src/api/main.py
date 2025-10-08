@@ -14,13 +14,29 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+# Define allowed origins based on environment
+if ENVIRONMENT == "production":
+    #TODO: Production: Add actual frontend URLs
+    allowed_origins = [
+        "https://your-app.vercel.app",  #TODO: Update with Vercel URL
+        "https://your-custom-domain.com",  #TODO: Update with  custom domain
+    ]
+else:
+    # Development: Allow local Next.js dev server
+    allowed_origins = [
+        "http://localhost:3000",  # Next.js default dev server
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",  # Alternative port
+    ]
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=allowed_origins,  # Configure appropriately for production
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
 
 # Include routers
